@@ -4,8 +4,8 @@ import argparse
 import datetime
 import calendar
 import requests
-import lxml.html as lh
 import appdirs
+from bs4 import BeautifulSoup
 
 WIKIPEDIA_ARTICLE_ADDR = "https://en.wikipedia.org/wiki/"
 EVENTS_FILEPATH = appdirs.user_data_dir("eventoftheday", "tedski999") + "/events"
@@ -48,8 +48,12 @@ def download_events(args):
             time.sleep(0.01)
             address_string = WIKIPEDIA_ARTICLE_ADDR + month_name + "_" + str(day)
             print("Scrapping all historic events from " + address_string)
-            #response = requests.get(address_string)
-            # TODO: scrape 'events' list from downloaded web page and append each to month_events
+            page = requests.get(address_string)
+            soup = BeautifulSoup(page.content, "html.parser")
+            event_header = soup.find_all("span", class_="mw-headline", id="Events")[0] # TODO: parent is needed (this is the span)
+            # TODO: keep getting next from event_header header until the next class_="mw-headline" is reached, keeping and parsing "li" tags only
+            # TODO: save parsed and formatted "li" tags to month_events
+
         all_events.append(month_events)
 
     # TODO: write all the scrapped events to EVENTS_FILEPATH, formatted as:
