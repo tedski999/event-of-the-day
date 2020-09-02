@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import random
 import json
 import re
 import argparse
@@ -26,21 +27,19 @@ def main():
     args = parser.parse_args()
     args.func(args)
 
+# Print a randomly selected historic event for the date
 def print_random_event(args):
-    try:
-        events_file = open(EVENTS_FILEPATH, "r")
-    except OSError:
-        sys.stderr.write("Could not open events data: " + EVENTS_FILEPATH + "\nHave you downloaded the events from Wikipedia with 'eventoftheday download'?\n")
-        quit(1)
+    date = datetime.datetime.now()
+    day_suffix = ["th", "st", "nd", "rd", "th"][min(date.day % 10, 4)]
+    if 11 <= (date.day % 100) <= 13:
+        day_suffix = "th"
+    month_name = calendar.month_name[date.month]
+    print(month_name, str(date.day) + day_suffix + ",", random.choice(get_day_events(month_name, str(date.day))))
 
-    with events_file:
-        date_string = datetime.datetime.now().strftime("%MMMM_%d")
-        # TODO: find relevant events from events_file
-
-    # TODO: print a random event
-
+# Print all the downloaded historic events for the date
 def print_events(args):
-    print("TODO: list events")
+    date = datetime.datetime.now()
+    print(*get_day_events(calendar.month_name[date.month], str(date.day)), sep="\n")
 
 # Scrapes all of the Wikipedia day articles for historic events
 def download_events(args):
@@ -98,6 +97,23 @@ def download_events(args):
         os.mkdir(USER_DATA_DIR)
     with open(EVENTS_FILEPATH, "w") as events_file:
         events_file.write(data)
+
+# Read in JSON data from events file and return array of historic events for month and day
+def get_day_events(month, day):
+
+    # Attempt to open the events data file
+    try:
+        events_file = open(EVENTS_FILEPATH, "r")
+    except OSError:
+        sys.stderr.write("Could not open events data: " + EVENTS_FILEPATH + "\nHave you downloaded the events from Wikipedia with 'eventoftheday download'?\n")
+        quit(1)
+
+    # Load JSON object from file
+    with events_file:
+        events_data = json.load(events_file)
+        day_events = events_data[month]
+        day_events = day_events[day]
+    return day_events
 
 main()
 
