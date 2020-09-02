@@ -1,3 +1,5 @@
+#!/usr/bin/python
+
 import os
 import sys
 import time
@@ -17,29 +19,38 @@ EVENTS_FILEPATH = USER_DATA_DIR + "/events"
 VALID_LEAP_YEAR = 2012
 
 def main():
-    # TODO: -d / --date argument to specify a date instead of the default of today
-    # TODO: remove ... from usage and subcommand metavar from subcommands list
-    parser = argparse.ArgumentParser()
-    subparser = parser.add_subparsers(metavar="subcommand", required=True, dest="subcommand")
-    subparser.add_parser("random", help="prints a random historic event that occurred on todays date").set_defaults(func=print_random_event)
-    subparser.add_parser("events", help="prints a list of all the historic events that occurred on todays date").set_defaults(func=print_events)
-    subparser.add_parser("download", help="downloads all the historic events from Wikipedia (https://en.wikipedia.org/wiki/Category:Days)").set_defaults(func=download_events)
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.RawTextHelpFormatter,
+        description="Downloads and prints major historic events from Wikipedia",
+        epilog="Note: This script is not future-proof, as Wikipedias day articles may change in format!\n\nTed Johnson, 2020")
+    subparser = parser.add_subparsers(metavar="commands", required=True)
+    subparser_random = subparser.add_parser("random", usage="%(prog)s [-h] [-d date]", help="prints a random historic event that occurred on todays date")
+    subparser_random.add_argument(
+        "-d", "--date", metavar="date",
+        type=date, default=datetime.datetime.now().strftime("%m/%d"),
+        help="override the date of the historic events (format: MONTH/DAY)")
+    subparser_random.set_defaults(func=print_random_event)
+    subparser_events = subparser.add_parser("events", usage="%(prog)s [-h] [-d date]", help="prints a list of all the historic events that occurred on todays date", )
+    subparser_events.add_argument(
+        "-d", "--date", metavar="date",
+        type=date, default=datetime.datetime.now().strftime("%m/%d"),
+        help="override the date of the historic events (format: MONTH/DAY)")
+    subparser_events.set_defaults(func=print_events)
+    subparser.add_parser("download", usage="%(prog)s [-h]", help="downloads all the historic events from Wikipedia (https://en.wikipedia.org/wiki/Category:Days)").set_defaults(func=download_events)
     args = parser.parse_args()
     args.func(args)
 
 # Print a randomly selected historic event for the date
 def print_random_event(args):
-    date = datetime.datetime.now()
-    day_suffix = ["th", "st", "nd", "rd", "th"][min(date.day % 10, 4)]
-    if 11 <= (date.day % 100) <= 13:
+    day_suffix = ["th", "st", "nd", "rd", "th"][min(args.date.day % 10, 4)]
+    if 11 <= (args.date.day % 100) <= 13:
         day_suffix = "th"
-    month_name = calendar.month_name[date.month]
-    print(month_name, str(date.day) + day_suffix + ",", random.choice(get_day_events(month_name, str(date.day))))
+    month_name = calendar.month_name[args.date.month]
+    print(month_name, str(args.date.day) + day_suffix + ",", random.choice(get_day_events(month_name, str(args.date.day))))
 
 # Print all the downloaded historic events for the date
 def print_events(args):
-    date = datetime.datetime.now()
-    print(*get_day_events(calendar.month_name[date.month], str(date.day)), sep="\n")
+    print(*get_day_events(calendar.month_name[args.date.month], str(args.date.day)), sep="\n")
 
 # Scrapes all of the Wikipedia day articles for historic events
 def download_events(args):
@@ -97,6 +108,11 @@ def download_events(args):
         os.mkdir(USER_DATA_DIR)
     with open(EVENTS_FILEPATH, "w") as events_file:
         events_file.write(data)
+
+# Parse a datetime object from a provided string
+def date(date_string):
+    date = datetime.datetime.strptime(date_string, "%m/%d")
+    return date
 
 # Read in JSON data from events file and return array of historic events for month and day
 def get_day_events(month, day):
