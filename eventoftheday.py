@@ -2,6 +2,7 @@
 
 import os
 import sys
+import signal
 import time
 import random
 import json
@@ -19,10 +20,11 @@ EVENTS_FILEPATH = USER_DATA_DIR + "/events"
 VALID_LEAP_YEAR = 2012
 
 def main():
+    signal.signal(signal.SIGINT, int_signal_handler)
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawTextHelpFormatter,
         description="Downloads and prints major historic events from Wikipedia",
-        epilog="Note: This script is not future-proof, as Wikipedias day articles may change in format!\n\nTed Johnson, 2020")
+        epilog="Note: This script is not future-proof, as Wikipedia's day articles may change in format!\n\nTed Johnson, 2020")
     subparser = parser.add_subparsers(metavar="commands", required=True)
     subparser_random = subparser.add_parser("random", usage="%(prog)s [-h] [-d date]", help="prints a random historic event that occurred on todays date")
     subparser_random.add_argument(
@@ -46,7 +48,7 @@ def print_random_event(args):
     if 11 <= (args.date.day % 100) <= 13:
         day_suffix = "th"
     month_name = calendar.month_name[args.date.month]
-    print(month_name, str(args.date.day) + day_suffix + ",", random.choice(get_day_events(month_name, str(args.date.day))))
+    print("{0} {1}, {2}".format(month_name, str(args.date.day) + day_suffix, random.choice(get_day_events(month_name, str(args.date.day)))))
 
 # Print all the downloaded historic events for the date
 def print_events(args):
@@ -68,12 +70,15 @@ def download_events(args):
             day_events = []
 
             # Download and begin parsing the Wikipedia page
-            # TODO: error handling
             time.sleep(0.01)
             address_string = WIKIPEDIA_ARTICLE_ADDR + month_name + "_" + str(day)
-            print("Scraping " + address_string + "...")
-            page = requests.get(address_string)
-            soup = BeautifulSoup(page.content, "html.parser")
+            print("Scraping {0}...".format(address_string))
+            try:
+                page = requests.get(address_string)
+                soup = BeautifulSoup(page.content, "html.parser")
+            except requests.exceptions.RequestException as err:
+                sys.stderr.write("An error occurred while trying to download {0}:\n{1}".format(address_string, err))
+                quit(1)
 
             # Locate and loop through every event on the page
             year_events_tag = soup.find("span", class_="mw-headline", id="Events").parent
@@ -121,7 +126,7 @@ def get_day_events(month, day):
     try:
         events_file = open(EVENTS_FILEPATH, "r")
     except OSError:
-        sys.stderr.write("Could not open events data: " + EVENTS_FILEPATH + "\nHave you downloaded the events from Wikipedia with 'eventoftheday download'?\n")
+        sys.stderr.write("Could not open events data: {0}\nHave you downloaded the events from Wikipedia with 'eventoftheday download'?\n".format(EVENTS_FILEPATH))
         quit(1)
 
     # Load JSON object from file
@@ -130,6 +135,10 @@ def get_day_events(month, day):
         day_events = events_data[month]
         day_events = day_events[day]
     return day_events
+
+# Exit gracefully when receiving SIGINT
+def int_signal_handler(sig, frame):
+    quit(1)
 
 main()
 
