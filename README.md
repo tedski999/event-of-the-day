@@ -34,7 +34,7 @@ Before any historic events can be printed, we first need to download the events 
 $ eventoftheday download
 ```
 
-This command may take a while, as each Wikipedia article, from `January_1` to `December_31`, has to be downloaded and parsed. Finally, the parsed events will be saved to disk in JSON format.
+This command may take a while, as each Wikipedia article, from `January_1` to `December_31`, has to be downloaded and parsed. The parsed events for each day are saved to disk.
 
 Now with all the major historic events downloaded, we can use the following commands to print them:
 
