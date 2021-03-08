@@ -1,132 +1,223 @@
 #!/usr/bin/python
 
-import os
-import sys
-import signal
-import argparse
-import datetime
-import calendar
-import appdirs
+import os, sys, signal, datetime, calendar, json, appdirs
 
-WIKIPEDIA_ARTICLE_ADDR = "https://en.wikipedia.org/wiki/"
+PROGRESS_BAR_LENGTH = 50
 USER_DATA_DIR = appdirs.user_data_dir("eventoftheday", "tedski999")
-VALID_LEAP_YEAR = 2012
+API_URL = "https://en.wikipedia.org/api/rest_v1/feed/onthisday/all"
+EVENT_CATEGORIES = {
+    "births" : "Birthday wishes to {0}",
+    "deaths" : "Rest in peace {0}",
+    "events" : "{0}",
+    "holidays" : "{0}"
+}
+
+USAGE_MESSAGE = """
+USAGE:
+    eventoftheday [-h]
+    eventoftheday [-adst]
+    eventoftheday download [-o]
+"""
+
+HELP_MESSAGE = f"""
+A tool to download and print historic events from Wikipedia.
+{USAGE_MESSAGE}
+OPTIONS:
+    -h --help         Print this message and exit
+    -a --all          Prints every event that occurred today instead of just one
+    -d --date [date]  Specify a date instead of using todays date (month/day)
+    -t --type [type]  Filter events to certain types (births,deaths,events,holidays)
+    -s --simple       Don't prepend the date to the output
+
+DOWNLOAD OPTIONS:
+    -o --overwrite    Overwrite any previously downloaded event files instead of skipping.
+
+EXAMPLE USES:
+    eventoftheday
+        Print a random event that occurred on todays date, downloaded from Wikipedia.
+        If you haven't previously downloaded this day, the days events will first have to be downloaded.
+        See the download subcommand for more info.
+
+    eventoftheday --all --simple
+        Prints every downloaded event that occurred today, without the date prepended.
+        If none are found, they will be fetched from Wikipedia.
+
+    eventoftheday --type births,deaths
+        Only print events that are either the birth or death of an historical figure.
+
+    eventoftheday --date 01/02 --all
+        All the downloaded events that occurred on the 2nd of January will be printed.
+
+    eventoftheday download --overwrite
+        Download the events of every day in the year from Wikipedia.
+        Overwrite any previously downloaded event files.
+        Note that this command can take some time.
+
+Ted Johnson 2021 (tedjohnsonjs@gmail.com)
+eventoftheday v2.0 - MIT License
+"""
 
 def main():
     signal.signal(signal.SIGINT, int_signal_handler)
-    parser = argparse.ArgumentParser(
-        formatter_class=argparse.RawTextHelpFormatter,
-        description="Downloads and prints major historic events from Wikipedia",
-        epilog="Note: This script is not future-proof, as Wikipedia's day articles may change in format!\n\nTed Johnson, 2020")
-    subparser = parser.add_subparsers(metavar="commands", required=True)
-    subparser_random = subparser.add_parser("random", usage="%(prog)s [-h] [-d date]", help="prints a random historic event that occurred on todays date")
-    subparser_random.add_argument(
-        "-d", "--date", metavar="date",
-        type=date, default=datetime.datetime.now().strftime("%m/%d"),
-        help="override the date of the historic events (format: MONTH/DAY)")
-    subparser_random.set_defaults(func=print_random_event)
-    subparser_events = subparser.add_parser("events", usage="%(prog)s [-h] [-d date]", help="prints a list of all the historic events that occurred on todays date", )
-    subparser_events.add_argument(
-        "-d", "--date", metavar="date",
-        type=date, default=datetime.datetime.now().strftime("%m/%d"),
-        help="override the date of the historic events (format: MONTH/DAY)")
-    subparser_events.set_defaults(func=print_events)
-    subparser.add_parser("download", usage="%(prog)s [-h]", help="downloads all the historic events from Wikipedia (https://en.wikipedia.org/wiki/Category:Days)").set_defaults(func=download_events)
-    args = parser.parse_args()
-    args.func(args)
 
-# Print a randomly selected historic event for the date
-def print_random_event(args):
-    import random
-    day_suffix = ["th", "st", "nd", "rd", "th"][min(args.date.day % 10, 4)]
-    if 11 <= (args.date.day % 100) <= 13:
-        day_suffix = "th"
-    month_name = calendar.month_name[args.date.month]
-    print("{0} {1}, {2}".format(month_name, str(args.date.day) + day_suffix, random.choice(get_day_events(month_name, str(args.date.day)))))
+    # Default arguments
+    func = print_events
+    args = {
+        "date" : datetime.datetime.now(),
+        "categories" : EVENT_CATEGORIES,
+        "all" : False,
+        "simple" : False
+    }
 
-# Print all the downloaded historic events for the date
+    # Apply command-line arguments
+    i = 1
+    if len(sys.argv) > 1 and sys.argv[1] == "download":
+        func = download_events
+        args = { "overwrite" : False }
+        i += 1
+    while i < len(sys.argv):
+
+        try:
+            if func is print_events and sys.argv[i] in ("-d", "--date"):
+                i += 1
+                if i >= len(sys.argv):
+                    raise Exception("Missing argument after " + sys.argv[i - 1])
+                args["date"] = parse_date(sys.argv[i])
+            elif func is print_events and sys.argv[i] in ("-t", "--type"):
+                i += 1
+                if i >= len(sys.argv):
+                    raise Exception("Missing argument after " + sys.argv[i - 1])
+                args["categories"] = parse_categories(sys.argv[i])
+            elif func is print_events and sys.argv[i] in ("-a", "--all"):
+                args["all"] = True
+            elif func is print_events and sys.argv[i] in ("-s", "--simple"):
+                args["simple"] = True
+            elif func is download_events and sys.argv[i] in ("-o", "--overwrite"):
+                args["overwrite"] = True
+            elif sys.argv[i] in ("-?", "-h", "--help"):
+                print(HELP_MESSAGE, end="")
+                quit(0)
+            else:
+                raise Exception("Unknown argument: " + sys.argv[i])
+
+        except Exception as err:
+            sys.stderr.write(str(err) + "\n" + USAGE_MESSAGE)
+            quit(1)
+
+        i += 1
+
+    # Execute the appropriate function with the provided arguments
+    func(args)
+
+# Print the downloaded historic events for a date
 def print_events(args):
-    print(*get_day_events(calendar.month_name[args.date.month], str(args.date.day)), sep="\n")
+    events = get_day_events(args["date"].month, args["date"].day, args["categories"])
+    if not args["all"]:
+        import random
+        events = [random.choice(events)]
+    for event in events:
+        if not args["simple"]:
+            print("{0} {1}".format(calendar.month_name[args["date"].month], get_ordinal(args["date"].day)), end="")
+            if "year" in event:
+                print(", {0}".format(event["year"]), end="")
+            print(" - ", end="")
+        print(event["text"])
 
-# Scrapes all of the Wikipedia day articles for historic events
+# Returns a list of historic events for month and day
+def get_day_events(month, day, categories):
+    events = []
+    directory = os.path.join(USER_DATA_DIR, str(month), str(day))
+    for filename in categories:
+        filepath = os.path.join(directory, filename)
+        if not os.path.isfile(filepath):
+            sys.stderr.write("Events file for {0}/{1} not found, downloading now...\n".format(month, day))
+            fetch_day_events(month, day)
+        with open(filepath, "r") as file:
+            events.extend(json.load(file))
+    return events
+
+# Fetches and stores events from the Wikipedia API
 def download_events(args):
-    print("Downloading all historic events listed on the Wikipedia day articles...")
-
-    import re
     import time
+
+    print("Downloading historic events from the Wikipedia API...")
+
+    # Loop through every day of the year
+    month_lengths = [ 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 ]
+    for month in range(0, len(month_lengths)):
+        month_length = month_lengths[month]
+        month_name = calendar.month_name[month + 1]
+        for day in range(0, month_lengths[month]):
+
+            # Draw progress bar
+            progress = day / (month_length - 1)
+            progress_steps = int(PROGRESS_BAR_LENGTH * progress)
+            progrss_bar = "█" * progress_steps + '-' * (PROGRESS_BAR_LENGTH - progress_steps)
+            print("\r{0: <12} |{1}| {2:.1f}%".format(month_name + " " + str(day + 1), progrss_bar, progress * 100), end = "\r")
+
+            # Download day of events
+            if args["overwrite"] or not os.path.isdir(os.path.join(USER_DATA_DIR, str(month + 1), str(day + 1))):
+                fetch_day_events(month + 1, day + 1)
+                time.sleep(0.025)
+
+        print()
+
+# Fetch events from the Wikipedia API for a date
+def fetch_day_events(month, day):
     import requests
-    from bs4 import BeautifulSoup
 
-    # Loop through every month
-    for month in range(1, 13):
-
-        # Loop through every day in the month
-        month_name = calendar.month_name[month]
-        month_length = calendar.monthrange(VALID_LEAP_YEAR, month)[1]
-        for day in range(1, month_length + 1):
-            day_events = []
-
-            # Download and begin parsing the Wikipedia page
-            time.sleep(0.01)
-            address_string = WIKIPEDIA_ARTICLE_ADDR + month_name + "_" + str(day)
-            print("Scraping {0}...".format(address_string))
-            try:
-                page = requests.get(address_string, timeout=5)
-                soup = BeautifulSoup(page.content, "html.parser")
-            except requests.exceptions.RequestException as err:
-                sys.stderr.write("An error occurred while trying to download {0}:\n{1}".format(address_string, err))
-                quit(1)
-
-            # Locate and loop through every event on the page
-            year_events_tag = soup.find("span", class_="mw-headline", id="Events").parent
-            next_tag = year_events_tag.next_sibling.next_sibling
-            while next_tag.name != "h2":
-                if next_tag.name == "ul":
-                    for next_list_item in next_tag.find_all("li"):
-
-                        # Remove citation tags
-                        for sup_tag in next_list_item("sup"):
-                            sup_tag.decompose()
-
-                        # Parse valid text and save to day_events
-                        text = next_list_item.get_text()
-                        event_data = text.split(" – ")
-                        if len(event_data) == 2 and re.match(r"^[0-9]+\s+((BC|AD)\s+)?–.+$", text):
-                            day_events.append(event_data[0].strip() + " – " + event_data[1].strip())
-
-                # Go to the next tag
-                next_tag = next_tag.next_sibling.next_sibling
-
-            # Save all the parsed day events to disk
-            day_file_path = "{0}/{1}_{2}".format(USER_DATA_DIR, month_name, day)
-            if not os.path.isdir(USER_DATA_DIR):
-                os.mkdir(USER_DATA_DIR)
-            with open(day_file_path, "w") as day_file:
-                day_file.write("\n".join(day_events))
-
-    print("Done!")
-
-# Parse a datetime object from a provided string
-def date(date_string):
-    date = datetime.datetime.strptime(date_string, "%m/%d")
-    return date
-
-# Read and return a list of historic events for month and day
-def get_day_events(month, day):
-
-    # Attempt to open the events data file
-    day_file_path = "{0}/{1}_{2}".format(USER_DATA_DIR, month, day)
+    # Download events
+    url = "{0}/{1:02d}/{2:02d}".format(API_URL, month, day)
     try:
-        day_file = open(day_file_path, "r")
-    except OSError:
-        sys.stderr.write("Could not open day events data: {0}\nHave you downloaded the events from Wikipedia with 'eventoftheday download'?\n".format(day_file_path))
+        response = requests.get(url)
+        if response.status_code != 200:
+            raise Exception("Received error code " + str(response.status_code))
+        received_events = response.json()
+    except Exception as err:
+        sys.stderr.write("Could not get {0}:\n{1}\n".format(url, err))
         quit(1)
 
-    # Load events from disk
-    with day_file:
-        day_events = [line.rstrip() for line in day_file]
+    try:
+        # Make sure the directory exists before writing to it
+        directory = os.path.join(USER_DATA_DIR, str(month), str(day))
+        if not os.path.isdir(directory):
+            os.makedirs(directory, exist_ok = True)
 
-    return day_events
+        # Write a new file for each event category
+        for category in EVENT_CATEGORIES:
+            with open(os.path.join(directory, category), "w") as file:
+
+                # Convert received events to our own format
+                for event in received_events[category]:
+                    del event["pages"]
+                    if "year" in event:
+                        event["year"] = str(event["year"]) if event["year"] >= 0 else str(-event["year"]) + " BC"
+                    event["text"] = EVENT_CATEGORIES[category].format(event["text"].replace("\n", " "))
+
+                # Write JSON to file
+                json.dump(received_events[category], file)
+
+    except Exception as err:
+        sys.stderr.write("Unable to write events file:\n{0}\n".format(err))
+        quit(1)
+
+# Returns the appropriate suffix for a number
+def get_ordinal(number):
+    suffix = "th"
+    if not 11 <= number % 100 <= 13:
+        suffix = ["th", "st", "nd", "rd", "th"][min(number % 10, 4)]
+    return str(number) + suffix
+
+# Parse a datetime object from a provided string
+def parse_date(date_string):
+    return datetime.datetime.strptime(date_string, "%m/%d")
+
+# Parse event filters from a provided string
+def parse_categories(categories_string):
+    categories = categories_string.lower().split(",")
+    if not all(category in EVENT_CATEGORIES for category in categories):
+        raise Exception("Invalid event type filter " + categories_string)
+    return categories
 
 # Exit gracefully when receiving SIGINT
 def int_signal_handler(sig, frame):
