@@ -223,5 +223,6 @@ def parse_categories(categories_string):
 def int_signal_handler(sig, frame):
     quit(1)
 
-main()
+if __name__ == "__main__":
+    main()
 
